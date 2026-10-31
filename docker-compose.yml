@@ -1,0 +1,89 @@
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: smarttransit-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: smarttransit
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smarttransit_dev_2026}
+      POSTGRES_DB: smarttransit_db
+
+    ports:
+      - "127.0.0.1:5433:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U smarttransit -d smarttransit_db
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: smarttransit-web
+    restart: unless-stopped
+
+    ports:
+      - "3000:3000"
+      - "127.0.0.1:3001:3000"
+
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DOCKER_DATABASE_URL}
+      ADMIN_SETUP_TOKEN: ${ADMIN_SETUP_TOKEN}
+      ENABLE_LOCAL_ADMIN_API: "true"
+      ENABLE_DEMO_CROWD_REPORTS: "true"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+  
+  gps-simulator:
+    image: curlimages/curl:8.12.1
+    container_name: smarttransit-gps
+    restart: unless-stopped
+
+    depends_on:
+      - web
+
+    environment:
+      ADMIN_SETUP_TOKEN: ${ADMIN_SETUP_TOKEN:?ADMIN_SETUP_TOKEN is required}
+
+    entrypoint:
+      - /bin/sh
+      - -c
+
+    command: |
+      echo "Smart Transit GPS simulator starting..."
+
+      while true; do
+        if curl \
+          --silent \
+          --show-error \
+          --fail \
+          --max-time 10 \
+          --request POST \
+          --header "x-admin-token: $$ADMIN_SETUP_TOKEN" \
+          http://web:3000/api/simulation/tick \
+          > /dev/null; then
+
+          echo "GPS tick completed"
+        else
+          echo "GPS tick failed; retrying..."
+        fi
+
+        sleep 5
+      done
+
+volumes:
+  postgres_data:
+   

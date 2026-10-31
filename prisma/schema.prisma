@@ -1,0 +1,301 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ========================================
+// ENUMS
+// ========================================
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+  DISPATCHER
+  PASSENGER
+}
+
+enum BusStatus {
+  ACTIVE
+  IDLE
+  MAINTENANCE
+  OFFLINE
+}
+
+enum DirectionType {
+  OUTBOUND
+  INBOUND
+}
+
+enum PositionSource {
+  GPS
+  SIMULATION
+  MANUAL
+}
+
+enum ReportType {
+  BUS_CROWDED
+  BUS_MODERATE
+  BUS_EMPTY
+  STOP_CROWDED
+  DELAY
+}
+
+enum ReportStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum DispatchStatus {
+  PROPOSED
+  APPROVED
+  COMPLETED
+  CANCELLED
+}
+
+// ========================================
+// USERS
+// ========================================
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String?
+  role         UserRole @default(PASSENGER)
+
+  operatorId String?
+  operator   TransitOperator? @relation(fields: [operatorId], references: [id])
+
+  reports         CrowdReport[]
+  dispatchActions DispatchAction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([operatorId])
+}
+
+// ========================================
+// TRANSIT OPERATORS
+// ========================================
+
+model TransitOperator {
+  id      String  @id @default(cuid())
+  name    String
+  code    String  @unique
+  website String?
+
+  users  User[]
+  routes Route[]
+  buses  Bus[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ========================================
+// ROUTES
+// ========================================
+
+model Route {
+  id       String  @id @default(cuid())
+  number   String
+  name     String?
+  isActive Boolean @default(true)
+
+  operatorId String
+  operator   TransitOperator @relation(fields: [operatorId], references: [id])
+
+  directions RouteDirection[]
+  buses      Bus[]
+  reports    CrowdReport[]
+  dispatches DispatchAction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([operatorId, number])
+  @@index([number])
+}
+
+// ========================================
+// ROUTE DIRECTIONS
+// ========================================
+
+model RouteDirection {
+  id   String        @id @default(cuid())
+  type DirectionType
+
+  originName      String
+  destinationName String
+
+  // GeoJSON LineString formatinda saxlanilir:
+  // {"type":"LineString","coordinates":[[lng,lat],...]}
+  geometry Json?
+
+  routeId String
+  route   Route  @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  stops RouteStop[]
+  buses Bus[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([routeId, type])
+}
+
+// ========================================
+// BUS STOPS
+// ========================================
+
+model Stop {
+  id         String  @id @default(cuid())
+  externalId String? @unique
+  name       String
+
+  latitude  Float
+  longitude Float
+
+  routeStops RouteStop[]
+  reports    CrowdReport[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([latitude, longitude])
+}
+
+// ========================================
+// ROUTE STOP ORDER
+// ========================================
+
+model RouteStop {
+  id       String @id @default(cuid())
+  sequence Int
+
+  directionId String
+  direction   RouteDirection @relation(fields: [directionId], references: [id], onDelete: Cascade)
+
+  stopId String
+  stop   Stop   @relation(fields: [stopId], references: [id])
+
+  @@unique([directionId, sequence])
+  @@index([stopId])
+}
+
+// ========================================
+// BUSES
+// ========================================
+
+model Bus {
+  id          String    @id @default(cuid())
+  fleetCode   String    @unique
+  plateNumber String    @unique
+  capacity    Int
+  status      BusStatus @default(IDLE)
+
+  operatorId String
+  operator   TransitOperator @relation(fields: [operatorId], references: [id])
+
+  routeId String?
+  route   Route?  @relation(fields: [routeId], references: [id])
+
+  directionId String?
+  direction   RouteDirection? @relation(fields: [directionId], references: [id])
+
+  positions  BusPosition[]
+  reports    CrowdReport[]
+  dispatches DispatchAction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([routeId])
+  @@index([status])
+}
+
+// ========================================
+// BUS GPS POSITION HISTORY
+// ========================================
+
+model BusPosition {
+  id String @id @default(cuid())
+
+  busId String
+  bus   Bus    @relation(fields: [busId], references: [id], onDelete: Cascade)
+
+  latitude  Float
+  longitude Float
+  speedKmh  Float?
+  heading   Float?
+
+  source     PositionSource @default(GPS)
+  recordedAt DateTime       @default(now())
+
+  @@index([busId, recordedAt])
+}
+
+// ========================================
+// CROWDSOURCING REPORTS
+// ========================================
+
+model CrowdReport {
+  id String @id @default(cuid())
+
+  type   ReportType
+  status ReportStatus @default(PENDING)
+
+  confidence Float?
+  note       String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  routeId String?
+  route   Route?  @relation(fields: [routeId], references: [id])
+
+  busId String?
+  bus   Bus?    @relation(fields: [busId], references: [id])
+
+  stopId String?
+  stop   Stop?   @relation(fields: [stopId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([routeId, createdAt])
+  @@index([busId, createdAt])
+  @@index([stopId, createdAt])
+  @@index([status])
+}
+
+// ========================================
+// DISPATCH ACTIONS
+// ========================================
+
+model DispatchAction {
+  id String @id @default(cuid())
+
+  status DispatchStatus @default(PROPOSED)
+  reason String
+  notes  String?
+
+  dispatcherId String
+  dispatcher   User   @relation(fields: [dispatcherId], references: [id])
+
+  routeId String
+  route   Route  @relation(fields: [routeId], references: [id])
+
+  busId String?
+  bus   Bus?    @relation(fields: [busId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([routeId, createdAt])
+}

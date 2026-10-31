@@ -1,0 +1,8 @@
+-- CreateEnum
+CREATE TYPE "UserRole" AS ENUM ('ADMIN', 'OPERATOR', 'DISPATCHER', 'PASSENGER');
+
+-- CreateEnum
+CREATE TYPE "BusStatus" AS ENUM ('ACTIVE', 'IDLE', 'MAINTENANCE', 'OFFLINE');
+
+-- CreateEnum
+CREATE TYPE "DirectionType" AS ENUM ('OUTBOUND', 'INBOUND');
